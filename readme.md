@@ -62,6 +62,25 @@ APIs for embedding (like Google Generative AI) often have strict rate or quota l
 
 ---
 
+## Chat History and Context Carrying
+
+This RAG API implementation maintains a chat history for each video session to help carry context across multiple user queries. The chat history is managed using a Python dictionary (`chathistory`) where each key is a video ID and the value is a list of message objects (system, human, and AI messages).
+
+**How it works:**
+
+- For every new question about a video, the system:
+  - Adds the current prompt (system message) and user question (human message) to the chat history for that video.
+  - After the LLM generates an answer, it is also appended as an AI message.
+- This approach allows the system to maintain conversational context, enabling follow-up questions to be answered more accurately by referencing previous exchanges.
+- The chat history can be extended to include more advanced conversational memory or context windowing as needed.
+
+**Why it's important:**
+
+- Carrying context is crucial for multi-turn conversations, where users may ask follow-up questions or refer to previous answers.
+- It improves the user experience by making the assistant more coherent and context-aware, especially for complex topics discussed across several
+
+---
+
 ## Rag architecture
 
 ![Rag architecture](rag_architcture.png)

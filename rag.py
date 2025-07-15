@@ -22,12 +22,21 @@ from fastapi import FastAPI, Request
 from pydantic import BaseModel
 from typing import Dict
 import uvicorn
+from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.messages import HumanMessage, AIMessage,SystemMessage
 
 
 # Load environment variables from .env file
 dotenv.load_dotenv()
 
 app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # or specify your extension origin
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 video_dict: Dict[str, dict] = {}
 faiss_dbs: Dict[str, any] = {} 
@@ -168,30 +177,50 @@ def vectordb_loading(transcript):
         time.sleep(2) # Wait for 2 seconds before processing the next batch
     return faiss_index
 
-
+chathistory = {}
 def giveAnswers(question, video_data,retrieved_docs):
     prompt = PromptTemplate(
     template="""
-      You are a helpful assistant.
-      Answer ONLY from the provided transcript context with detailed explanation.
-      If the context is insufficient, just say you don't know.
-      
-      metadata: {metadata}
+     You are a helpful and knowledgeable assistant designed to answer questions about YouTube videos using their transcript data and metadata.
 
-      {context}
-      Question: {question}
+    Your goal is to provide accurate, clear, and detailed answers based primarily on the transcript of the video. Follow these strict instructions:
+
+    1. Only use the provided transcript content (`context`) to answer questions whenever possible.
+    2. If the transcript doesn't contain enough information, and you *factually* know the answer from your general knowledge **only if it's relevant to the video's topic**, you may answer briefly — but indicate this is beyond the transcript.
+    3. If the question cannot be answered from either the transcript or general factual knowledge related to the video's theme, respond with: **"I don't know this is beyond the video context."**
+    4. Do not fabricate information or assume things that are not in the transcript or contextually known.
+
+    ---
+
+    **Video Metadata:**  
+    {metadata}
+
+    **Transcript Context:**  
+    {context}
+
+    **User Question:**  
+    {question}
+
+    Answer:
     """,
     input_variables = ['context','metadata','question']
 )
     context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
     metadata = video_data["metadata"]
+    video_id = video_data["video_id"]
+    
     prompt_text = prompt.format(context=context_text, metadata=metadata, question=question)
     api_key = os.getenv("GOOGLE_API_KEY")
     if not api_key: 
         raise ValueError("GOOGLE_API_KEY environment variable not set.")
     llm=ChatGoogleGenerativeAI(model="models/gemini-2.0-flash", google_api_key=api_key)
+    if video_id not in chathistory:
+        chathistory[video_id] = []
+    chathistory[video_id].append(SystemMessage(content=prompt_text))
+    chathistory[video_id].append(HumanMessage(content=question))
     llm_response = llm.invoke(prompt_text)
     answer = llm_response.content
+    chathistory[video_id].append(AIMessage(content=answer))
     return answer
 
 
@@ -209,6 +238,7 @@ async def ask_question(payload: QARequest):
         print(f"[Using Cached Video Data] {video_id}")
     else:
         video_data = getVideoData(video_id)
+        
         if not video_data:
             return {"answer": "Video data not found or transcript unavailable."}
         
@@ -221,6 +251,7 @@ async def ask_question(payload: QARequest):
     print(f"[Retrieved Docs] {retrieved_docs}")
 
     answer = giveAnswers(question, video_data, retrieved_docs)
+    
     return {"answer": answer}
 
 
