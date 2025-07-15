@@ -178,17 +178,17 @@ def vectordb_loading(transcript):
     return faiss_index
 
 chathistory = {}
-def giveAnswers(question, video_data,retrieved_docs):
+def giveAnswers(question, video_data, retrieved_docs):
     prompt = PromptTemplate(
-    template="""
-     You are a helpful and knowledgeable assistant designed to answer questions about YouTube videos using their transcript data and metadata.
+        template="""
+    You are a helpful and knowledgeable assistant designed to answer questions about YouTube videos using their transcript data and metadata.
 
-    Your goal is to provide accurate, clear, and detailed answers based primarily on the transcript of the video. Follow these strict instructions:
+    Your goal is to provide accurate, clear, and detailed answers primarily based on the transcript. Follow these strict instructions:
 
-    1. Only use the provided transcript content (`context`) to answer questions whenever possible.
-    2. If the transcript doesn't contain enough information, and you *factually* know the answer from your general knowledge **only if it's relevant to the video's topic**, you may answer briefly — but indicate this is beyond the transcript.
-    3. If the question cannot be answered from either the transcript or general factual knowledge related to the video's theme, respond with: **"I don't know this is beyond the video context."**
-    4. Do not fabricate information or assume things that are not in the transcript or contextually known.
+    1. Use the provided transcript (`context`) whenever possible.
+    2. If it's not in the transcript, and you're *factually sure* from relevant knowledge, you may answer briefly but indicate this is beyond the transcript.
+    3. If unsure, respond with: **"I don't know, this is beyond the video context."**
+    4. Never fabricate information.
 
     ---
 
@@ -198,29 +198,53 @@ def giveAnswers(question, video_data,retrieved_docs):
     **Transcript Context:**  
     {context}
 
+    **Chat History:**  
+    {chathistory}
+
     **User Question:**  
     {question}
 
     Answer:
-    """,
-    input_variables = ['context','metadata','question']
-)
+""",
+        input_variables=["context", "metadata", "question", "chathistory"]
+    )
+
     context_text = "\n\n".join(doc.page_content for doc in retrieved_docs)
     metadata = video_data["metadata"]
     video_id = video_data["video_id"]
-    
-    prompt_text = prompt.format(context=context_text, metadata=metadata, question=question)
+
+    # Format chat history
+    history_messages = chathistory.get(video_id, [])
+    history_str = ""
+    for msg in history_messages:
+        if isinstance(msg, HumanMessage):
+            history_str += f"User: {msg.content}\n"
+        elif isinstance(msg, AIMessage):
+            history_str += f"AI Assistant: {msg.content}\n"
+
+    prompt_text = prompt.format(
+        context=context_text,
+        metadata=metadata,
+        question=question,
+        chathistory=history_str
+    )
+
+    # LLM setup
     api_key = os.getenv("GOOGLE_API_KEY")
-    if not api_key: 
+    if not api_key:
         raise ValueError("GOOGLE_API_KEY environment variable not set.")
-    llm=ChatGoogleGenerativeAI(model="models/gemini-2.0-flash", google_api_key=api_key)
-    if video_id not in chathistory:
-        chathistory[video_id] = []
-    chathistory[video_id].append(SystemMessage(content=prompt_text))
-    chathistory[video_id].append(HumanMessage(content=question))
+    llm = ChatGoogleGenerativeAI(model="models/gemini-2.0-flash", google_api_key=api_key)
+
+    # Call LLM
     llm_response = llm.invoke(prompt_text)
     answer = llm_response.content
+
+    # Update chat history
+    if video_id not in chathistory:
+        chathistory[video_id] = []
+    chathistory[video_id].append(HumanMessage(content=question))
     chathistory[video_id].append(AIMessage(content=answer))
+
     return answer
 
 
